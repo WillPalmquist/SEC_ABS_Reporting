@@ -13,6 +13,16 @@ header-includes:
    \floatplacement{table}{H}
 ---
 
+```{r setup}
+library(gt)
+library(dplyr)
+library(ggplot2)
+library(ggcorrplot)
+library(forecast)
+
+pal <- RColorBrewer::brewer.pal(9,"Blues")[4:9]
+```
+
 ## [ABS-EE Filing Data]{.underline}
 
 The Exeter Automobile Receivables Trust 2022-6 is an asset backed security comprised of subprime auto loans. The monthly loan level reporting data has the following characteristics:
@@ -23,26 +33,278 @@ The Exeter Automobile Receivables Trust 2022-6 is an asset backed security compr
 
 ### Accessing the Data
 
-To access, download, and aggregate the monthly asset data files, see `01-SEC-Scraping.R` in the associated github repo found here:
+To access, download, and aggregate the monthly asset data files, see `01-SEC-Scraping.R` in the associated github repo found [here](https://github.com/WillPalmquist/SEC_ABS_Reporting).
+
+```{r}
+#| echo: false
+abs_ee_data <- readRDS("../data/abs_ee_data_all.rds")
+
+abs_ee_data_clean <- abs_ee_data |>
+  dplyr::mutate(
+    dplyr::across(c(reportingPeriodBeginningDate,reportingPeriodEndingDate,interestPaidThroughDate),
+                  ~ as.Date(.x, format = "%m-%d-%Y")),
+    dplyr::across(c(contains("amount"), contains("percentage"), remainingTermToMaturityNumber, obligorCreditScore),
+                  ~ as.numeric(.x))
+  ) |> 
+  dplyr::group_by(assetNumber) |> 
+  dplyr::mutate(
+    prepaidFlag = ifelse(zeroBalanceCode == 1 & remainingTermToMaturityNumber > 1, 1,0), 
+    prepaidFlagFirst = ifelse(zeroBalanceCode == 1 & dplyr::lead(is.na(zeroBalanceCode) & remainingTermToMaturityNumber >1), 1,0)) |> 
+  dplyr::ungroup()
+
+```
 
 ## [Exploratory Analysis]{.underline}
 
-The following figures identify relevant trends regarding the
+### Obligor Credit Scores
 
 ```{r}
 #| echo: false
-1 + 1
+abs_ee_data_asset_group <- abs_ee_data_clean |> 
+  dplyr::group_by(assetNumber) |> 
+  dplyr::summarise(
+    creditScore = dplyr::first(obligorCreditScore),
+    employmentVerification = dplyr::first(obligorEmploymentVerificationCode),
+    incomeVerification = dplyr::first(obligorIncomeVerificationLevelCode),
+    totalChargeOffPrincipal = sum(chargedoffPrincipalAmount, na.rm = T),
+    prepaid = sum(prepaidFlag, na.rm = T),
+    paymentToIncome = first(paymentToIncomePercentage),
+    zeroBalanceCode = max(zeroBalanceCode, na.rm = T)
+  )
+# Create bins for credit scores
+bins <- seq(400, 900,by=50)
+
+# Bin the data and calculate average charged-off principal for each bin
+binned_data <- abs_ee_data_asset_group |> 
+  dplyr::filter(creditScore > 0)  |> 
+  dplyr::mutate(creditScoreBin = cut(creditScore, breaks = bins, include.lowest = FALSE)) |>
+  dplyr::filter(!is.na(creditScoreBin)) |> 
+  dplyr::group_by(creditScoreBin, incomeVerification) |>
+  dplyr::summarise(
+    TotalChargeOffPrincipal = mean(totalChargeOffPrincipal, na.rm = TRUE))
+
+# Plot the results
+ggplot2::ggplot(binned_data, ggplot2::aes(x = creditScoreBin, y = TotalChargeOffPrincipal, fill = incomeVerification)) +
+  scale_fill_brewer("GnBU")+
+  ggplot2::geom_col(stat = "identity",position = "stack") +
+  ggplot2::labs(
+    title = "Average Charged-Off Principal by Credit Score Bin",
+    x = "Credit Score Bin",
+    y = "Average Charged-Off Principal"
+  ) +
+  ggplot2::theme_minimal()
+
+
 ```
 
-You can add options to executable code like this
+### Payment Patterns
 
 ```{r}
-#| echo: false
-2 * 2
+ggplot(abs_ts_payments) +
+  geom_line(aes(x = remainingTermToMaturity, y = scheduledPrincipalAmount, colour = "Scheduled Principal Amount"),linetype = "dotted", size = 1) +
+  geom_line(aes(x = remainingTermToMaturity, y = actualPrincipalCollectedAmount, colour = "Actual Principal Collected Amount"), size = 1) +
+  geom_col(aes(x = remainingTermToMaturity, y = Diff, fill = `Under/Over Payment`), alpha = 0.5) +
+  scale_x_reverse() +
+  scale_colour_manual(name = "Line Legend", values = c("Scheduled Principal Amount" = "red", "Actual Principal Collected Amount" = "blue")) +
+  scale_fill_manual(name = "Column Legend", values = c("Under" = "darkred", "Over" = "darkgreen")) +
+  labs(title = "Actual vs. Scheduled Payments - Remaining Term to Maturity",
+       x = "Remaining Term to Maturity",
+       y = "Payments") +
+  theme_minimal()
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+### Loan Pool Composition over Time
 
-## Forecasting: Charged-Off Principal
+```{r}
+# ZeroBalance Breakdown 
+abs_ts_zero_balance <- abs_ee_data_clean |> 
+  dplyr::group_by(reportingPeriodEndingDate, zeroBalanceCode) |> 
+  dplyr::summarise(
+    n = n()
+  ) |> 
+  dplyr::mutate(
+    zeroBalanceCode = dplyr::case_match(
+      as.numeric(zeroBalanceCode),
+      1 ~ "Prepaid or Matured",
+      2 ~ "Third-Party Sale",
+      3 ~ "Repurchased or Replaced",
+      4 ~ "Charged-Off",
+      NA ~ "Active")
+    )
+
+abs_ts_zero_balance |> 
+  ggplot2::ggplot(ggplot2::aes(x = reportingPeriodEndingDate, y = n, fill = zeroBalanceCode)) +
+  ggplot2::scale_fill_brewer("GnBu")+
+  ggplot2::geom_bar(stat = "identity",position = "fill") +
+  ggplot2::labs(
+    title = "ABS Loan Status Composition Since Inception",
+    x = "Reporting Period End Date",
+    y = "Percent "
+  ) +
+  ggplot2::theme_minimal()
+
+```
+
+## [Forecasting: Charged-Off Principal]{.underline}
+
+```{r}
+abs_ts_sums <- abs_ee_data_clean |> 
+  dplyr::group_by(reportingPeriodEndingDate) |> 
+  dplyr::summarise(
+    dplyr::across(c(contains("amount"), contains("percentage"), remainingTermToMaturityNumber, obligorCreditScore),
+                  ~ sum(.x, na.rm = T)),
+    numberActiveLoans = sum(remainingTermToMaturityNumber > 0 & is.na(zeroBalanceCode), na.rm = T),
+    numberNewPrepaidLoans = sum(prepaidFlagFirst,na.rm = T),
+    numberPrepaidLoansTotal = sum(prepaidFlag, na.rm = T),
+    defaults = sum(zeroBalanceCode == 4, na.rm = T),
+    prepayments = sum(zeroBalanceCode == 1, na.rm = T)
+  ) |> 
+  dplyr::ungroup()
+
+```
+
+### Method 1
+
+```{r}
+# cumulative charged off principal
+cum_charged_off_principal <- sum(as.numeric(abs_ee_data$chargedoffPrincipalAmount), na.rm = T)
+cum_charged_off_principal
+#### Forecasting
+charged_off_principal_ts <- abs_ts_sums |> 
+  dplyr::select(reportingPeriodEndingDate,chargedoffPrincipalAmount,numberActiveLoans,numberNewPrepaidLoans,numberPrepaidLoansTotal) |> 
+  dplyr::mutate(
+    chargedoffPrincipalAmountCumulative = cumsum(chargedoffPrincipalAmount)
+  )
+
+### Model Fitting
+ts_data <- ts(charged_off_principal_ts$chargedoffPrincipalAmountCumulative, frequency = 19)
+
+# ARIMA
+fit_arima <- auto.arima(ts_data)
+forecast_arima <- forecast(fit_arima, h = 17)
+autoplot(forecast_arima) + ggtitle("ARIMA Forecast of Cumulative Charged-Off Principal")
+checkresiduals(fit_arima)
+# ETS
+fit_ets <- ets(ts_data)
+forecast_ets <- forecast(fit_ets, h = 17)
+autoplot(forecast_ets) + ggtitle("ETS Forecast of Cumulative Charged-Off Principal")
+checkresiduals(fit_ets)
+
+#Comparison
+errors_arima <- tsCV(ts_data, forecastfunction = function(x, h) forecast(auto.arima(x), h = h), h = 17)
+mae_arima <- mean(abs(errors_arima), na.rm = TRUE)
+mse_arima <- mean(errors_arima^2, na.rm = TRUE)
+
+# Cross-validation for ETS
+errors_ets <- tsCV(ts_data, forecastfunction = function(x, h) forecast(ets(x), h = h), h = 17)
+mae_ets <- mean(abs(errors_ets), na.rm = TRUE)
+mse_ets <- mean(errors_ets^2, na.rm = TRUE)
+
+# Compare MAE and MSE
+data.frame(
+  Model = c("ARIMA", "ETS"),
+  MAE = c(mae_arima, mae_ets),
+  MSE = c(mse_arima, mse_ets)
+)
+
+```
+
+### Method 2: 
+
+```{r}
+df_chargeoffs <- abs_ts_sums |> 
+  dplyr::select(reportingPeriodEndingDate, chargedoffPrincipalAmount, reportingPeriodActualEndBalanceAmount) |> 
+  dplyr::mutate(
+    chargeOffPercentOfBalance = chargedoffPrincipalAmount/reportingPeriodActualEndBalanceAmount,
+    EndBalanceAmountYOY = (reportingPeriodActualEndBalanceAmount/lag(reportingPeriodActualEndBalanceAmount))-1,
+    Period = "Actual"
+    )
+
+stableBalanceGrowthRate = mean(df_chargeoffs |> tail(12) |> dplyr::pull(EndBalanceAmountYOY),na.rm =T)
+stableChargeOffPercent = mean(df_chargeoffs |> tail(12) |> dplyr::pull(chargeOffPercentOfBalance),na.rm =T)
+
+last_balance <- df_chargeoffs |> pull(reportingPeriodActualEndBalanceAmount) |> tail(1)
+
+df_forecast <- data.frame(
+  reportingPeriodEndingDate = seq.Date(from = max(df_chargeoffs$reportingPeriodEndingDate) %m+% months(1), by = "month",length.out = 17),
+  reportingPeriodActualEndBalanceAmount = last_balance *cumprod(rep(1+stableBalanceGrowthRate,17))
+) |> 
+  dplyr::mutate(
+    chargedoffPrincipalAmount = reportingPeriodActualEndBalanceAmount * stableChargeOffPercent,
+    Period = "Forecast"
+  )
+
+combined_forecast <- df_chargeoffs |> 
+  dplyr::bind_rows(df_forecast) |> 
+  dplyr::mutate(
+    cumulativeSumChargeOffs = cumsum(chargedoffPrincipalAmount)
+  )
+
+CumulativeChargeOffsMonth19 <- sum(combined_forecast$chargedoffPrincipalAmount[combined_forecast$Period == "Actual"], na.rm = T)
+CumulativeChargeOffsMonth36 <- sum(combined_forecast$chargedoffPrincipalAmount, na.rm = T)
+
+ggplot2::ggplot(combined_forecast) +
+  ggplot2::geom_line(ggplot2::aes(x = reportingPeriodEndingDate, y = chargedoffPrincipalAmount, color = Period), size = 1) +
+  ggplot2::theme_minimal()
+
+ggplot2::ggplot(combined_forecast) +
+  ggplot2::geom_line(ggplot2::aes(x = reportingPeriodEndingDate, y = reportingPeriodActualEndBalanceAmount, color = Period), size = 1) +
+  ggplot2::theme_minimal()
+
+```
+
+```{r}
+ggplot(combined_forecast) +
+  ggplot2::geom_line(ggplot2::aes(x = reportingPeriodEndingDate, y = cumulativeSumChargeOffs, color = Period), size = 1) +
+  ggplot2::theme_minimal()
+
+```
 
 ## Kelley-Blue Book Values
+
+### Vehicle Value Sources
+
+```{r}
+vehicles_value_code <- abs_ee_data_clean |>
+  dplyr::filter(reportingPeriodEndingDate == "2024-04-30") |>
+  dplyr::mutate(
+    vehicleValueSourceCode = dplyr::case_match(
+      as.numeric(vehicleValueSourceCode),
+      1 ~ "Invoice Price",
+      2 ~ "MSRP",
+      3 ~ "Kelley Blue Book",
+      98 ~ "Other",
+      NA ~ "Other")
+  ) |> 
+  dplyr::group_by(vehicleValueSourceCode) |>
+  dplyr::summarise(
+    records = dplyr::n()
+  ) 
+vehicles_value_code |> gt::gt()
+```
+
+### Top 10 Standard Deviations
+
+```{r}
+# April 2024 KBB Values
+vehicle_kbb_std <- abs_ee_data_clean |>
+  dplyr::filter(reportingPeriodEndingDate == "2024-04-30", vehicleValueSourceCode == 3) |>
+  dplyr::group_by(vehicleManufacturerName,vehicleModelName) |>
+  dplyr::summarise(
+    records = dplyr::n(),
+    stdev = sd(vehicleValueAmount, na.rm = T)
+  ) |>
+  dplyr::filter(records > 30)
+
+# April 2024 Max Stdev
+top10_stdev_vehicle_value <- vehicle_kbb_std |>
+  dplyr::ungroup() |>
+  dplyr::slice_max(order_by = stdev,n = 10)
+
+top10_stdev_vehicle_value |> 
+  dplyr::mutate(vehicleMakeModel = paste0(vehicleManufacturerName," ",vehicleModelName)) |> 
+  ggplot2::ggplot(aes(x = reorder(vehicleMakeModel,-stdev), y = stdev, fill = stdev)) +
+  ggplot2::geom_col() 
+
+```
