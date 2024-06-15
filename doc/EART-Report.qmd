@@ -1,0 +1,48 @@
+---
+title: "Exeter Automobile Receivables Trust - Case"
+author: "Will Palmquist"
+format: 
+  pdf:
+   fig-width: 10
+   fig-height: 20
+   documentclass: article
+editor: visual
+pdf-engine: pdflatex
+header-includes:
+   \usepackage{float}
+   \floatplacement{table}{H}
+---
+
+## [ABS-EE Filing Data]{.underline}
+
+The Exeter Automobile Receivables Trust 2022-6 is an asset backed security comprised of subprime auto loans. The monthly loan level reporting data has the following characteristics:
+
+-   31635 auto loans
+
+-   19 months of data from 2022-10-01 to present
+
+### Accessing the Data
+
+To access, download, and aggregate the monthly asset data files, see `01-SEC-Scraping.R` in the associated github repo found here:
+
+## [Exploratory Analysis]{.underline}
+
+The following figures identify relevant trends regarding the
+
+```{r}
+#| echo: false
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+## Forecasting: Charged-Off Principal
+
+## Kelley-Blue Book Values
