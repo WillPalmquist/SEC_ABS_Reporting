@@ -127,7 +127,8 @@ abs_ts_payments <- abs_ee_data_clean |>
   group_by(remainingTermToMaturity = as.numeric(remainingTermToMaturityNumber)) |>
   summarise(
     actualPrincipalCollectedAmount = mean(actualPrincipalCollectedAmount, na.rm = T),
-    scheduledPrincipalAmount = mean(scheduledPrincipalAmount, na.rm = T)
+    scheduledPrincipalAmount = mean(scheduledPrincipalAmount, na.rm = T),
+    totalChargeOffs = mean(chargedoffPrincipalAmount, na.rm = T)
   ) |> 
   dplyr::mutate(
     Diff = actualPrincipalCollectedAmount - scheduledPrincipalAmount,
@@ -146,4 +147,70 @@ ggplot(abs_ts_payments) +
        y = "Payments") +
   theme_minimal()
 
+ggplot(abs_ts_payments) +
+  # geom_line(aes(x = remainingTermToMaturity, y = scheduledPrincipalAmount, colour = "Scheduled Principal Amount"),linetype = "dotted", size = 1) +
+  geom_line(aes(x = remainingTermToMaturity, y = totalChargeOffs, colour = "Actual Principal Collected Amount"), size = 1) +
+  # geom_col(aes(x = remainingTermToMaturity, y = Diff, fill = `Under/Over Payment`), alpha = 0.5) +
+  scale_x_reverse() +
+  scale_colour_manual(name = "Line Legend", values = c("Scheduled Principal Amount" = "red", "Actual Principal Collected Amount" = "blue")) +
+  scale_fill_manual(name = "Column Legend", values = c("Under" = "darkred", "Over" = "darkgreen")) +
+  labs(title = "Actual vs. Scheduled Payments - Remaining Term to Maturity",
+       x = "Remaining Term to Maturity",
+       y = "Payments") +
+  theme_minimal()
 
+###### Time series Facet Plots
+abs_ts_sums <- abs_ee_data_clean |> 
+  dplyr::group_by(reportingPeriodEndingDate) |> 
+  dplyr::summarise(
+    dplyr::across(c(contains("amount"), contains("percentage"), remainingTermToMaturityNumber, obligorCreditScore),
+                  ~ sum(.x, na.rm = T))
+  ) |> 
+  dplyr::ungroup()
+
+abs_ts_cumsums <- abs_ee_data_clean |> 
+  dplyr::group_by(reportingPeriodEndingDate) |> 
+  dplyr::summarise(
+    dplyr::across(c(contains("amount"), contains("percentage"), remainingTermToMaturityNumber, obligorCreditScore),
+                  ~ sum(.x, na.rm = T))
+  ) |> 
+  dplyr::mutate(
+    dplyr::across(c(contains("amount"), contains("percentage"), remainingTermToMaturityNumber, obligorCreditScore),
+                  ~ cumsum(.x))
+  ) |> 
+  dplyr::ungroup()
+
+
+abs_ts_sums_long <- abs_ts_sums |> 
+  dplyr::select(reportingPeriodEndingDate, actualPrincipalCollectedAmount,actualInterestCollectedAmount,chargedoffPrincipalAmount) |> 
+  tidyr::pivot_longer(cols = -reportingPeriodEndingDate)
+
+ggplot2::ggplot(abs_ts_sums_long, ggplot2::aes(reportingPeriodEndingDate,value)) +
+  ggplot2::geom_line() +
+  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+  # ggplot2::geom_smooth(alpha = .5) +
+  ggplot2::facet_wrap(~ name, scales = "free_y", ncol = 3) +
+  ggplot2::theme_bw()
+
+abs_ts_cumsums_long <- abs_ts_cumsums |> 
+  dplyr::select(reportingPeriodEndingDate, contains("Amount")) |> 
+  tidyr::pivot_longer(cols = -reportingPeriodEndingDate)
+
+ggplot2::ggplot(abs_ts_cumsums_long, ggplot2::aes(reportingPeriodEndingDate,value)) +
+  ggplot2::geom_line() +
+  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+  # ggplot2::geom_smooth(alpha = .5) +
+  ggplot2::facet_wrap(~ name, scales = "free_y", ncol = 3) +
+  ggplot2::theme_bw()
+
+#### Overall Outstanding Amount
+df_overall_loan_balance <- abs_ts_sums |> 
+  dplyr::select(reportingPeriodEndingDate, chargedoffPrincipalAmount, reportingPeriodActualEndBalanceAmount, originalLoanAmount)
+
+ggplot(df_overall_loan_balance) +
+  geom_point(aes(x = reportingPeriodEndingDate, y = originalLoanAmount, colour = "Total Original Loan Amount"), size = 2) +
+  geom_point(aes(x = reportingPeriodEndingDate, y = reportingPeriodActualEndBalanceAmount, colour = "Total Outstanding Balance"), size = 2) +
+  geom_area(aes(x = reportingPeriodEndingDate, y = originalLoanAmount, colour = "Total Original Loan Amount", fill = "Total Original Loan Amount"), alpha = 0.3,size = 1) +
+  geom_area(aes(x = reportingPeriodEndingDate, y = reportingPeriodActualEndBalanceAmount, colour = "Total Outstanding Balance", fill = "Total Outstanding Balance"), alpha = 0.3, size = 1) +
+  scale_colour_manual(name = "Line Legend", values = c("Total Original Loan Amount" = "", "Total Outstanding Balance" = "blue")) +
+  scale_fill_manual(name = "Line Legend", values = c("Total Original Loan Amount" = "lightblue", "Total Outstanding Balance" = "blue")) 
