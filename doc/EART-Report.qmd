@@ -3,6 +3,7 @@ title: "Exeter Automobile Receivables Trust"
 subtitle: "Case Study"
 author: "Will Palmquist"
 date: "2024-06-16"
+date-format: short
 format: 
   pdf:
    fig-width: 10
@@ -41,7 +42,11 @@ The Exeter Automobile Receivables Trust 2022-6 is an asset backed security compr
 
 ### Accessing the Data
 
-To access, download, and aggregate the monthly asset data files, see `01-SEC-Scraping.R` in the associated github repo found [here](https://github.com/WillPalmquist/SEC_ABS_Reporting). All associated scripts, quarto documents, and data files can also be found in the repository.
+To access, download, and aggregate the monthly asset data files, see `01-SEC-Scraping.R` in the associated github repo found [here](https://github.com/WillPalmquist/SEC_ABS_Reporting).
+
+### Analysis
+
+All associated scripts, quarto documents, and data files can also be found in the linked repository.
 
 ```{r, echo = FALSE}
 # Prep Datasets
@@ -156,7 +161,7 @@ ggplot2::ggplot(credit_score_binned_data, ggplot2::aes(x = creditScoreBin, y = n
 
 {{< pagebreak >}}
 
-Next, I analyzed the difference in the average charged-off principal by asset since inception. I was expecting individuals with lower credit scores to have a significantly higher average value than those on the right. While individuals with a credit score greater than 750 are significantly lower (aside from an outlier in the final bin), there is no clear relationship between credit score and the average charged-off amount on the loan. This demonstrates the need to analyze obligor risk beyond simple metrics like credit score.
+Next, I analyzed the difference in the average charged-off principal by asset since inception. I was expecting individuals with lower credit scores to have a significantly higher average value than those with higher scores. While individuals with a credit score greater than 750 are significantly lower (aside from an outlier in the final bin), there is no clear relationship between credit score and the average charged-off amount on the loan. This demonstrates the need to analyze obligor risk beyond simple metrics like credit score.
 
 ```{r, echo = FALSE}
 # Plot the results
@@ -234,7 +239,7 @@ ggplot(abs_ts_payments) +
 
 #### Total Outstanding Loan Balance
 
-At the highest level, I wanted to understand the total loan amount and how this value is paid down over time. The figure below shows a simple time series of the overall loan amount and the total balance remaining aggregated at the monthly level. In terms of time to maturity, the ABS is still early in its overall life. After the first few months in which individual loans accumulate, there is a stable decline in overall principal amount as borrowers make payments against their loan balance.
+At the highest level, I wanted to understand the total loan amount and how this value is paid down over time. The figure below shows a time series of the overall loan amount and the total balance remaining aggregated at the monthly level. In terms of time to maturity, the ABS is still early in its overall life. After the first few months in which individual loans accumulate, there is a stable decline in overall principal amount as borrowers make payments against their loan balance.
 
 ```{r, echo = FALSE}
 df_overall_loan_balance <- abs_ts_sums |> 
@@ -247,7 +252,7 @@ ggplot(df_overall_loan_balance) +
   geom_area(aes(x = reportingPeriodEndingDate, y = reportingPeriodActualEndBalanceAmount, colour = "Total Outstanding Balance", fill = "Total Outstanding Balance"), alpha = 0.4, size = 1) +
   scale_colour_manual(name = "Line Legend", values = c("Total Original Loan Amount" = "lightblue", "Total Outstanding Balance" = "blue")) +
   scale_fill_manual(name = "Line Legend", values = c("Total Original Loan Amount" = "lightblue", "Total Outstanding Balance" = "blue")) +
-    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
     ggplot2::labs(
     title = "ABS Original Loan Amounts vs. Remaining Principal",
     x = "Reporting Period End Date",
@@ -282,13 +287,13 @@ abs_ts_sums_long <- abs_ts_sums |>
 
 ggplot2::ggplot(abs_ts_sums_long, ggplot2::aes(reportingPeriodEndingDate,value)) +
   ggplot2::geom_line() +
-  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
   ggplot2::geom_smooth(size = .5,alpha = .5, ) +
   ggplot2::facet_wrap(~ name, ncol = 1) +
   ggplot2::labs(
     title = "Interest, Principal, and Charge-Off by Month",
     x = "Reporting Period End Date",
-    y = "Totals (thousands)"
+    y = "Total Amount (Thousands)"
   ) +
   ggplot2::scale_x_date(date_breaks = "3 months") +
   ggplot2::theme_minimal()+
@@ -301,7 +306,6 @@ ggplot2::ggplot(abs_ts_sums_long, ggplot2::aes(reportingPeriodEndingDate,value))
     legend.text = element_text(size = 14),
     legend.title = element_text(size = 14),
     legend.position = "bottom" 
-
   )
 
 
@@ -347,7 +351,7 @@ abs_ts_zero_balance |>
     axis.title.y = element_text(size = 16),
     axis.text.x = element_text(size = 14),
     axis.text.y = element_text(size = 14),
-    legend.text = element_text(size = 12),
+    legend.text = element_text(size = 10),
     legend.title = element_text(size = 12),
     legend.position = "bottom"
   ) 
@@ -408,7 +412,7 @@ ts_data <- ts(charged_off_principal_ts$chargedoffPrincipalAmountCumulative)
 fit_arima <- auto.arima(ts_data)
 forecast_arima <- forecast(fit_arima, h = 17)
 autoplot(forecast_arima) + ggtitle("ARIMA Forecast of Cumulative Charged-Off Principal") +
-    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
     ggplot2::scale_x_continuous(breaks = seq(0,36, by = 6))+
     ggplot2::labs(
     x = "Time Period (Month)",
@@ -434,7 +438,7 @@ autoplot(forecast_arima) + ggtitle("ARIMA Forecast of Cumulative Charged-Off Pri
 fit_ets <- ets(ts_data)
 forecast_ets <- forecast(fit_ets, h = 17)
 autoplot(forecast_ets) + ggtitle("ETS Forecast of Cumulative Charged-Off Principal") +
-    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ","))  +
+    ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ","))  +
     ggplot2::scale_x_continuous(breaks = seq(0,36, by = 6))+
     ggplot2::labs(
     x = "Time Period (Month)",
@@ -529,9 +533,9 @@ ggplot2::ggplot(combined_forecast) +
     ggplot2::labs(
     title = "Forecast: Monthly Charged-Off Principal",
     x = "Month",
-    y = "Totals (thousands)"
+    y = "Total Amount (Thousands)"
 ) +
-  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+  ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
     ggplot2::scale_x_date(date_breaks = "6 months") +
   scale_colour_manual(name = "Line Legend", values = c("Actual" = "black", "Forecast" = "blue")) +
   theme(
@@ -554,9 +558,9 @@ ggplot2::ggplot(combined_forecast) +
     ggplot2::labs(
     title = "Forecast: Monthly Loan Balance",
     x = "Month",
-    y = "Totals (thousands)"
+    y = "Total Amount (Thousands)"
   ) +
-      ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+      ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
     ggplot2::scale_x_date(date_breaks = "6 months") +
   ggplot2::scale_colour_manual(name = "Line Legend", values = c("Actual" = "black", "Forecast" = "blue")) +
   theme(
@@ -590,9 +594,9 @@ ggplot(combined_forecast) +
     ggplot2::labs(
     title = "Forecast: Cumulative Charged-Off Principal Amount",
     x = "Month",
-    y = "Totals (thousands)"
+    y = "Total Amount (Thousands)"
   ) + 
-      ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$", suffix = "k", scale = 1e-3, big.mark = ",")) +
+      ggplot2::scale_y_continuous(labels = scales::label_number(prefix = "$",  scale = 1e-3, big.mark = ",")) +
   scale_colour_manual(name = "Line Legend", values = c("Actual" = "black", "Forecast" = "blue")) +
   theme(
     plot.title = element_text(size = 18),
